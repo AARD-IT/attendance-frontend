@@ -6,6 +6,7 @@ import CEOSidebar from '../components/CEOSidebar'
 import { useAuth } from '../contexts/AuthContext'
 import MonthYearFilter from '../components/MonthYearFilter'
 import dashboardService from '../services/dashboardService'
+import logo from '../assets/page-logo/logo (1).png'
 import { averageTimeLabel, formatDepartmentName } from '../utils/time'
 
 interface SummaryData {
@@ -40,6 +41,9 @@ interface LiveEvent {
   total_hours?: number
 }
 
+const AUTO_REFRESH_KEY = 'ceo-auto-refresh-enabled'
+const AUTO_REFRESH_INTERVAL_MS = 60 * 60 * 1000
+
 export default function CEODashboard() {
   const auth = useAuth()
   const navigate = useNavigate()
@@ -53,6 +57,7 @@ export default function CEODashboard() {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(() => localStorage.getItem(AUTO_REFRESH_KEY) === 'true')
   const [refreshMessage, setRefreshMessage] = useState('')
   const [search, setSearch] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
@@ -154,7 +159,7 @@ export default function CEODashboard() {
     navigate('/login', { replace: true })
   }
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     if (!auth.token) return
 
     setIsRefreshing(true)
@@ -179,6 +184,22 @@ export default function CEODashboard() {
     } finally {
       setIsRefreshing(false)
     }
+  }, [auth.token, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
+
+  useEffect(() => {
+    if (!auth.token || !autoRefreshEnabled) return
+
+    const timer = window.setInterval(() => {
+      void handleRefresh()
+    }, AUTO_REFRESH_INTERVAL_MS)
+
+    return () => window.clearInterval(timer)
+  }, [auth.token, autoRefreshEnabled, handleRefresh])
+
+  const toggleAutoRefresh = () => {
+    const nextValue = !autoRefreshEnabled
+    setAutoRefreshEnabled(nextValue)
+    localStorage.setItem(AUTO_REFRESH_KEY, String(nextValue))
   }
 
   const ChartTooltip = ({ active, payload, label }: any) => {
@@ -211,7 +232,10 @@ export default function CEODashboard() {
       <header className="border-b border-slate-200 bg-white shadow-sm">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Analytics Avenue</p>
+            <div className="mb-2 flex items-center gap-3">
+              <img src={logo} alt="Analytics Avenue logo" className="h-10 w-10 object-contain" />
+              <span className="text-lg font-extrabold tracking-tight sm:text-xl"><span className="text-[#1C3D76]">Analytics</span><span className="text-[#080808]"> Avenue</span></span>
+            </div>
             <h1 className="text-3xl font-bold">CEO Attendance Analytics</h1>
             <p className="text-sm text-slate-600">Attendance movement, workload analytics, and employee-level reporting.</p>
           </div>
@@ -223,6 +247,13 @@ export default function CEODashboard() {
               className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {isRefreshing ? 'Refreshing…' : 'Refresh Latest Data'}
+            </button>
+            <button
+              type="button"
+              onClick={toggleAutoRefresh}
+              className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${autoRefreshEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+            >
+              {autoRefreshEnabled ? 'Auto Refresh: ON' : 'Auto Refresh: OFF'}
             </button>
             <button onClick={handleLogout} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white">Sign Out</button>
           </div>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import CEOSidebar from '../components/CEOSidebar'
 import { useAuth } from '../contexts/AuthContext'
 import dashboardService from '../services/dashboardService'
+import logo from '../assets/page-logo/logo (1).png'
 import { createDefaultAutomationSettings, loadAutomationSettings, saveAutomationSettings, type AutomationSettingsPayload } from '../services/emailAutomationService'
 import { ensureEmailPreference, type EmailPreferenceRow, updateEmailPreference } from '../services/emailPreferenceService'
 import { listEmailLogs, type EmailLogRow } from '../services/emailLogService'
@@ -216,7 +217,10 @@ export default function CEOAttendanceReportsAlerts() {
       <header className="border-b border-slate-200 bg-white shadow-sm">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Analytics Avenue</p>
+            <div className="mb-2 flex items-center gap-3">
+              <img src={logo} alt="Analytics Avenue logo" className="h-10 w-10 object-contain" />
+              <span className="text-lg font-extrabold tracking-tight sm:text-xl"><span className="text-[#1C3D76]">Analytics</span><span className="text-[#080808]"> Avenue</span></span>
+            </div>
             <h1 className="text-3xl font-bold">ATTENDANCE REPORTS & ALERTS</h1>
             <p className="text-sm text-slate-600">Manage attendance reports, employee notifications, email preferences, automation schedules, and communication history.</p>
           </div>

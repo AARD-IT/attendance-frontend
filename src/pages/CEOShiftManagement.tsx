@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import CEOSidebar from '../components/CEOSidebar'
 import { useAuth } from '../contexts/AuthContext'
 import dashboardService from '../services/dashboardService'
+import logo from '../assets/page-logo/logo (1).png'
 import { SHIFT_RULES } from '../services/shiftRules'
 import shiftManagementService from '../services/shiftManagementService'
 
@@ -39,6 +40,7 @@ export default function CEOShiftManagement() {
   const [employees, setEmployees] = useState<EmployeeAssignment[]>([])
   const [history, setHistory] = useState<AssignmentRecord[]>([])
   const [toast, setToast] = useState('')
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeAssignment | null>(null)
   const [form, setForm] = useState({ employee_email: '', cc_email: '', shift_type: 'Shift 1', effective_from: '', effective_to: '' })
@@ -47,30 +49,35 @@ export default function CEOShiftManagement() {
     const load = async () => {
       if (!auth.token) return
       try {
-        const rows = await dashboardService.getEmployeeAttendanceTable(new Date().getMonth() + 1, new Date().getFullYear())
-        const saved = JSON.parse(localStorage.getItem('shift-management-assignments') || '[]')
+        const [rows, remote] = await Promise.all([
+          dashboardService.getEmployeeAttendanceTable(new Date().getMonth() + 1, new Date().getFullYear()),
+          shiftManagementService.getShiftAssignments(),
+        ])
+
+        const fallback = JSON.parse(localStorage.getItem('shift-management-assignments') || '[]')
+        const assignments = Array.isArray(remote) && remote.length
+          ? [...remote, ...fallback.filter((item: any) => !remote.some((entry: any) => String(entry.employee_id) === String(item.employee_id)))]
+          : fallback
+
         const nextRows = rows.map((row: any) => {
-          const current = saved.find((item: any) => String(item.employee_id) === String(row.employee_id)) || {}
+          const current = assignments.find((item: any) => String(item.employee_id) === String(row.employee_id)) || {}
           return {
             employee_id: String(row.employee_id || ''),
             employee_name: String(row.employee_name || 'Unknown Employee'),
-            employee_email: String(current.employee_email || ''),
+            employee_email: String(current.employee_email || row.employee_email || ''),
             cc_email: String(current.cc_email || ''),
             shift_type: String(current.shift_type || 'Shift 1'),
             effective_from: String(current.effective_from || ''),
             effective_to: String(current.effective_to || ''),
           }
         })
-        setEmployees(nextRows)
-      } catch {
-        setEmployees([])
-      }
 
-      try {
-        const remote = await shiftManagementService.getShiftAssignments()
-        setHistory(Array.isArray(remote) ? remote : [])
+        setEmployees(nextRows)
+        setHistory(Array.isArray(remote) ? remote : fallback)
       } catch {
-        setHistory(JSON.parse(localStorage.getItem('shift-management-assignments') || '[]'))
+        const fallback = JSON.parse(localStorage.getItem('shift-management-assignments') || '[]')
+        setEmployees([])
+        setHistory(fallback)
       }
     }
 
@@ -95,31 +102,39 @@ export default function CEOShiftManagement() {
   }
 
   const refreshAssignments = async () => {
+    setIsRefreshing(true)
     try {
-      const rows = await dashboardService.getEmployeeAttendanceTable(new Date().getMonth() + 1, new Date().getFullYear())
-      const saved = JSON.parse(localStorage.getItem('shift-management-assignments') || '[]')
+      const [rows, remote] = await Promise.all([
+        dashboardService.getEmployeeAttendanceTable(new Date().getMonth() + 1, new Date().getFullYear()),
+        shiftManagementService.getShiftAssignments({ forceRefresh: true }),
+      ])
+
+      const fallback = JSON.parse(localStorage.getItem('shift-management-assignments') || '[]')
+      const assignments = Array.isArray(remote) && remote.length
+        ? [...remote, ...fallback.filter((item: any) => !remote.some((entry: any) => String(entry.employee_id) === String(item.employee_id)))]
+        : fallback
+
       const nextRows = rows.map((row: any) => {
-        const current = saved.find((item: any) => String(item.employee_id) === String(row.employee_id)) || {}
+        const current = assignments.find((item: any) => String(item.employee_id) === String(row.employee_id)) || {}
         return {
           employee_id: String(row.employee_id || ''),
           employee_name: String(row.employee_name || 'Unknown Employee'),
-          employee_email: String(current.employee_email || ''),
+          employee_email: String(current.employee_email || row.employee_email || ''),
           cc_email: String(current.cc_email || ''),
           shift_type: String(current.shift_type || 'Shift 1'),
           effective_from: String(current.effective_from || ''),
           effective_to: String(current.effective_to || ''),
         }
       })
-      setEmployees(nextRows)
-    } catch {
-      setEmployees([])
-    }
 
-    try {
-      const remote = await shiftManagementService.getShiftAssignments()
-      setHistory(Array.isArray(remote) ? remote : [])
+      setEmployees(nextRows)
+      setHistory(Array.isArray(remote) ? remote : fallback)
     } catch {
-      setHistory(JSON.parse(localStorage.getItem('shift-management-assignments') || '[]'))
+      const fallback = JSON.parse(localStorage.getItem('shift-management-assignments') || '[]')
+      setEmployees([])
+      setHistory(fallback)
+    } finally {
+      setIsRefreshing(false)
     }
   }
 
@@ -222,11 +237,24 @@ export default function CEOShiftManagement() {
       <header className="border-b border-slate-200 bg-white shadow-sm">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Analytics Avenue</p>
+            <div className="mb-2 flex items-center gap-3">
+              <img src={logo} alt="Analytics Avenue logo" className="h-10 w-10 object-contain" />
+              <span className="text-lg font-extrabold tracking-tight sm:text-xl"><span className="text-[#1C3D76]">Analytics</span><span className="text-[#080808]"> Avenue</span></span>
+            </div>
             <h1 className="text-3xl font-bold">Shift Management</h1>
             <p className="text-sm text-slate-600">Manage employee shifts, email routing, attendance policies, and shift assignments from one place.</p>
           </div>
-          <button onClick={handleLogout} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white">Sign Out</button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => refreshAssignments()}
+              disabled={isRefreshing}
+              className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isRefreshing ? 'Refreshing…' : 'Refresh Latest Data'}
+            </button>
+            <button onClick={handleLogout} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white">Sign Out</button>
+          </div>
         </div>
       </header>
 

@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
+import logo from '../assets/page-logo/logo (1).png'
 
 interface CEOSidebarProps {
   collapsed: boolean
@@ -80,16 +81,10 @@ export default function CEOSidebar({ collapsed, onToggle }: CEOSidebarProps) {
         </div>
 
         <div className="mb-8 flex items-center gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/80">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-500 to-cyan-400 text-white shadow-lg shadow-indigo-100/80">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6" aria-hidden="true">
-              <path d="M4 14.5 12 6l8 8.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M7 12.5V19h10v-6.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
+          <img src={logo} alt="Analytics Avenue logo" className="h-12 w-12 object-contain" />
           {!collapsed ? (
             <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-indigo-600">Analytics Avenue</p>
-              <p className="text-sm text-slate-600">Attendance Analytics</p>
+              <span className="text-lg font-extrabold tracking-tight sm:text-xl"><span className="text-[#1C3D76]">Analytics</span><span className="text-[#080808]"> Avenue</span></span>
             </div>
           ) : null}
         </div>
