@@ -42,7 +42,15 @@ interface LiveEvent {
 }
 
 const AUTO_REFRESH_KEY = 'ceo-auto-refresh-enabled'
+const REFRESH_STATUS_KEY = 'ceo-refresh-status'
 const AUTO_REFRESH_INTERVAL_MS = 60 * 60 * 1000
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+
+interface RefreshStatus {
+  enabled: boolean
+  lastLoadedAt: string | null
+  lastLoadedBy: 'manual' | 'auto' | null
+}
 
 export default function CEODashboard() {
   const auth = useAuth()
@@ -58,6 +66,14 @@ export default function CEODashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(() => localStorage.getItem(AUTO_REFRESH_KEY) === 'true')
+  const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>(() => {
+    try {
+      const raw = localStorage.getItem(REFRESH_STATUS_KEY)
+      return raw ? (JSON.parse(raw) as RefreshStatus) : { enabled: false, lastLoadedAt: null, lastLoadedBy: null }
+    } catch {
+      return { enabled: false, lastLoadedAt: null, lastLoadedBy: null }
+    }
+  })
   const [refreshMessage, setRefreshMessage] = useState('')
   const [search, setSearch] = useState('')
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
@@ -81,8 +97,8 @@ export default function CEODashboard() {
         dashboardService.getLiveAttendanceFeed(undefined, undefined, { forceRefresh }),
       ])
 
-      setSummary(summaryRes)
-      setLiveFeed(liveRes)
+      setSummary(summaryRes as SummaryData)
+      setLiveFeed(liveRes as LiveEvent[])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load analytics dashboard')
     } finally {
@@ -95,7 +111,7 @@ export default function CEODashboard() {
 
     try {
       const chartRes = await dashboardService.getEmployeeAttendanceTable(chartMonth, chartYear, { forceRefresh })
-      setChartEmployees(chartRes)
+      setChartEmployees(chartRes as EmployeeSummary[])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load chart analytics')
     }
@@ -106,7 +122,7 @@ export default function CEODashboard() {
 
     try {
       const employeeRes = await dashboardService.getEmployeeAttendanceTable(selectedMonth, selectedYear, { forceRefresh })
-      setEmployees(employeeRes)
+      setEmployees(employeeRes as EmployeeSummary[])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load employee table')
     }
@@ -159,7 +175,7 @@ export default function CEODashboard() {
     navigate('/login', { replace: true })
   }
 
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(async (source: 'manual' | 'auto' = 'manual') => {
     if (!auth.token) return
 
     setIsRefreshing(true)
@@ -174,32 +190,138 @@ export default function CEODashboard() {
         fetchEmployeeTableData(true),
       ])
 
+      const timestamp = new Date().toLocaleString()
+      const nextStatus = {
+        enabled: autoRefreshEnabled,
+        lastLoadedAt: timestamp,
+        lastLoadedBy: source,
+      }
+      setRefreshStatus(nextStatus)
+      localStorage.setItem(REFRESH_STATUS_KEY, JSON.stringify(nextStatus))
+      await syncDashboardSettings(autoRefreshEnabled, nextStatus)
+
       if (syncResult?.success) {
-        setRefreshMessage('Latest Minerva data synced successfully.')
+        setRefreshMessage(source === 'auto' ? 'Auto refresh loaded the latest Minerva data.' : 'Latest Minerva data synced successfully.')
       } else {
-        setRefreshMessage('Refresh completed, but some sync checks returned warnings.')
+        setRefreshMessage(source === 'auto' ? 'Auto refresh completed, but some sync checks returned warnings.' : 'Refresh completed, but some sync checks returned warnings.')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh latest Minerva data')
     } finally {
       setIsRefreshing(false)
     }
-  }, [auth.token, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
+  }, [auth.token, autoRefreshEnabled, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
 
   useEffect(() => {
     if (!auth.token || !autoRefreshEnabled) return
 
     const timer = window.setInterval(() => {
-      void handleRefresh()
+      void handleRefresh('auto')
     }, AUTO_REFRESH_INTERVAL_MS)
 
     return () => window.clearInterval(timer)
   }, [auth.token, autoRefreshEnabled, handleRefresh])
 
-  const toggleAutoRefresh = () => {
+  useEffect(() => {
+    const loadSharedSettings = async () => {
+      try {
+        const token = localStorage.getItem('attendance-dashboard-token') || ''
+        const response = await fetch(`${API_BASE}/api/ceo/dashboard-settings`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!response.ok) return
+
+        const serverSettings = await response.json().catch(() => null)
+        const normalizedSettings = Array.isArray(serverSettings) ? serverSettings[0] : serverSettings
+        if (!normalizedSettings) return
+
+        const nextEnabled = Boolean(normalizedSettings.auto_refresh_enabled)
+        setAutoRefreshEnabled((prev) => (prev === nextEnabled ? prev : nextEnabled))
+        localStorage.setItem(AUTO_REFRESH_KEY, String(nextEnabled))
+
+        const nextStatus = {
+          enabled: nextEnabled,
+          lastLoadedAt: normalizedSettings.last_loaded_at || null,
+          lastLoadedBy: normalizedSettings.last_loaded_by || null,
+        }
+        setRefreshStatus((prev) => (prev.lastLoadedAt === nextStatus.lastLoadedAt && prev.lastLoadedBy === nextStatus.lastLoadedBy && prev.enabled === nextStatus.enabled ? prev : nextStatus))
+        localStorage.setItem(REFRESH_STATUS_KEY, JSON.stringify(nextStatus))
+      } catch {
+        // Fall back to the existing local storage state.
+      }
+    }
+
+    void loadSharedSettings()
+
+    const syncFromStorage = () => {
+      const nextEnabled = localStorage.getItem(AUTO_REFRESH_KEY) === 'true'
+      setAutoRefreshEnabled(nextEnabled)
+
+      try {
+        const raw = localStorage.getItem(REFRESH_STATUS_KEY)
+        if (raw) {
+          const nextStatus = JSON.parse(raw) as RefreshStatus
+          setRefreshStatus(nextStatus)
+        }
+      } catch {
+        // Ignore malformed stored status.
+      }
+    }
+
+    window.addEventListener('storage', syncFromStorage)
+    return () => window.removeEventListener('storage', syncFromStorage)
+  }, [])
+
+  const syncDashboardSettings = useCallback(async (nextEnabled: boolean, nextStatus?: RefreshStatus) => {
+    try {
+      const token = localStorage.getItem('attendance-dashboard-token') || ''
+      const response = await fetch(`${API_BASE}/api/ceo/dashboard-settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          auto_refresh_enabled: nextEnabled,
+          last_loaded_at: nextStatus?.lastLoadedAt || refreshStatus.lastLoadedAt || null,
+          last_loaded_by: nextStatus?.lastLoadedBy || refreshStatus.lastLoadedBy || null,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to sync auto refresh setting')
+      }
+
+      const stored = await response.json().catch(() => null)
+      const normalizedStored = Array.isArray(stored) ? stored[0] : stored
+      if (normalizedStored) {
+        setRefreshStatus({
+          enabled: Boolean(normalizedStored.auto_refresh_enabled),
+          lastLoadedAt: normalizedStored.last_loaded_at || nextStatus?.lastLoadedAt || refreshStatus.lastLoadedAt || null,
+          lastLoadedBy: normalizedStored.last_loaded_by || nextStatus?.lastLoadedBy || refreshStatus.lastLoadedBy || null,
+        })
+      } else {
+        setRefreshStatus(nextStatus ?? { enabled: nextEnabled, lastLoadedAt: refreshStatus.lastLoadedAt || null, lastLoadedBy: refreshStatus.lastLoadedBy || null })
+      }
+    } catch {
+      // Fallback to local storage if the backend sync fails.
+    }
+  }, [refreshStatus])
+
+  const toggleAutoRefresh = async () => {
     const nextValue = !autoRefreshEnabled
     setAutoRefreshEnabled(nextValue)
     localStorage.setItem(AUTO_REFRESH_KEY, String(nextValue))
+
+    const nextStatus = {
+      enabled: nextValue,
+      lastLoadedAt: refreshStatus.lastLoadedAt,
+      lastLoadedBy: refreshStatus.lastLoadedBy,
+    }
+    setRefreshStatus(nextStatus)
+    localStorage.setItem(REFRESH_STATUS_KEY, JSON.stringify(nextStatus))
+
+    await syncDashboardSettings(nextValue, nextStatus)
   }
 
   const ChartTooltip = ({ active, payload, label }: any) => {
@@ -242,7 +364,7 @@ export default function CEODashboard() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={handleRefresh}
+              onClick={() => void handleRefresh('manual')}
               disabled={isRefreshing}
               className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-70"
             >
@@ -263,6 +385,20 @@ export default function CEODashboard() {
       <main className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8">
         {error ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : null}
         {refreshMessage ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{refreshMessage}</div> : null}
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Refresh status</p>
+              <h2 className="text-lg font-semibold">Latest Minerva load</h2>
+              <p className="text-sm text-slate-500">This panel updates every time the dashboard refreshes data manually or via the 60-minute auto refresh cycle.</p>
+            </div>
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <p><span className="font-semibold">Auto refresh:</span> {autoRefreshEnabled ? 'ON' : 'OFF'}</p>
+              <p><span className="font-semibold">Last loaded:</span> {refreshStatus.lastLoadedAt || 'No refresh has been run yet.'}</p>
+              <p><span className="font-semibold">Triggered by:</span> {refreshStatus.lastLoadedBy ? refreshStatus.lastLoadedBy.toUpperCase() : '—'}</p>
+            </div>
+          </div>
+        </section>
 
         {tab === 'dashboard' ? (
           <>

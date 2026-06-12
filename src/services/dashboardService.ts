@@ -3,6 +3,37 @@ import shiftManagementService from './shiftManagementService'
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
 const CACHE_TTL_MS = 10 * 60 * 1000
 
+interface DashboardSummaryResponse {
+  total_employees?: number
+  present_today?: number
+  absent_today?: number
+  late_arrivals?: number
+  attendance_percentage?: number
+}
+
+interface LiveAttendanceFeedItem {
+  employee_name?: string
+  date?: string
+  check_in?: string
+  check_out?: string
+  status?: string
+  total_hours?: number
+}
+
+interface EmployeeAttendanceTableItem {
+  employee_id?: string
+  employee_name?: string
+  employee_code?: string
+  department?: string
+  average_working_hours?: number
+  average_login_time?: string
+  average_logout_time?: string
+  total_late_count?: number
+  login_deviation?: number
+  logout_deviation?: number
+  escalations?: number
+}
+
 function authHeader() {
   const token = localStorage.getItem('attendance-dashboard-token') || ''
   return { Authorization: `Bearer ${token}` }
@@ -47,11 +78,11 @@ async function fetchWithCache<T>(name: string, url: string, options?: { forceRef
   return data
 }
 
-export async function getDashboardSummary(month?: number, year?: number, options?: { forceRefresh?: boolean }) {
+export async function getDashboardSummary(month?: number, year?: number, options?: { forceRefresh?: boolean }): Promise<DashboardSummaryResponse> {
   const params = new URLSearchParams()
   if (month) params.set('month', String(month))
   if (year) params.set('year', String(year))
-  return fetchWithCache('dashboard-summary', `${API_BASE}/api/dashboard/summary${params.toString() ? `?${params.toString()}` : ''}`, options)
+  return fetchWithCache<DashboardSummaryResponse>('dashboard-summary', `${API_BASE}/api/dashboard/summary${params.toString() ? `?${params.toString()}` : ''}`, options)
 }
 
 export async function getDashboardTrends(month?: number, year?: number, options?: { forceRefresh?: boolean }) {
@@ -72,11 +103,11 @@ export async function getWorkingHours(month?: number, year?: number, options?: {
   return fetchWithCache('working-hours', `${API_BASE}/api/dashboard/working-hours${params.toString() ? `?${params.toString()}` : ''}`, options)
 }
 
-export async function getEmployeeAttendanceTable(month?: number, year?: number, options?: { forceRefresh?: boolean }) {
+export async function getEmployeeAttendanceTable(month?: number, year?: number, options?: { forceRefresh?: boolean }): Promise<EmployeeAttendanceTableItem[]> {
   const params = new URLSearchParams()
   if (month) params.set('month', String(month))
   if (year) params.set('year', String(year))
-  return fetchWithCache('employee-attendance-table', `${API_BASE}/api/dashboard/employees${params.toString() ? `?${params.toString()}` : ''}`, options)
+  return fetchWithCache<EmployeeAttendanceTableItem[]>('employee-attendance-table', `${API_BASE}/api/dashboard/employees${params.toString() ? `?${params.toString()}` : ''}`, options)
 }
 
 export async function getEmployeeDetail(employeeId: string, month?: number, year?: number, options?: { forceRefresh?: boolean }) {
@@ -132,11 +163,11 @@ export async function getEmployeeAttendanceAnalytics(employeeId: string, month?:
   return fetchWithCache(`employee-attendance-analytics:${employeeId}`, `${API_BASE}/api/v1/employees/${employeeId}/attendance${params.toString() ? `?${params.toString()}` : ''}`, options)
 }
 
-export async function getLiveAttendanceFeed(month?: number, year?: number, options?: { forceRefresh?: boolean }) {
+export async function getLiveAttendanceFeed(month?: number, year?: number, options?: { forceRefresh?: boolean }): Promise<LiveAttendanceFeedItem[]> {
   const params = new URLSearchParams()
   if (month) params.set('month', String(month))
   if (year) params.set('year', String(year))
-  return fetchWithCache('live-attendance-feed', `${API_BASE}/api/dashboard/live${params.toString() ? `?${params.toString()}` : ''}`, options)
+  return fetchWithCache<LiveAttendanceFeedItem[]>('live-attendance-feed', `${API_BASE}/api/dashboard/live${params.toString() ? `?${params.toString()}` : ''}`, options)
 }
 
 export async function syncMinervaAll() {
