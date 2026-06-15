@@ -56,6 +56,7 @@ export default function CEODashboard() {
   const auth = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const userId = auth.user?.id || 'anonymous'
   const [collapsed, setCollapsed] = useState(false)
   const [tab, setTab] = useState<'dashboard' | 'employees'>(location.pathname === '/ceo/employees' ? 'employees' : 'dashboard')
   const [summary, setSummary] = useState<SummaryData | null>(null)
@@ -270,7 +271,7 @@ export default function CEODashboard() {
 
     window.addEventListener('storage', syncFromStorage)
     return () => window.removeEventListener('storage', syncFromStorage)
-  }, [])
+  }, [userId])
 
   const syncDashboardSettings = useCallback(async (nextEnabled: boolean, nextStatus?: RefreshStatus) => {
     try {
