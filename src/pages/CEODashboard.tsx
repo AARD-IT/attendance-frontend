@@ -6,6 +6,7 @@ import CEOSidebar from '../components/CEOSidebar'
 import { useAuth } from '../contexts/AuthContext'
 import MonthYearFilter from '../components/MonthYearFilter'
 import dashboardService from '../services/dashboardService'
+import { subscribeToAttendanceDaily } from '../services/realtimeAttendance'
 import logo from '../assets/page-logo/logo (1).png'
 import { averageTimeLabel, formatDepartmentName } from '../utils/time'
 
@@ -135,6 +136,18 @@ export default function CEODashboard() {
       fetchChartData()
       fetchEmployeeTableData()
     }
+  }, [auth.token, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
+
+  useEffect(() => {
+    if (!auth.token) return
+
+    const unsubscribe = subscribeToAttendanceDaily(() => {
+      void fetchDashboardData(true)
+      void fetchChartData(true)
+      void fetchEmployeeTableData(true)
+    })
+
+    return unsubscribe
   }, [auth.token, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
 
   const displayName = (value: string) => value.split(/\s+/).filter(Boolean).slice(0, 1).join(' ') || 'Unknown Employee'
