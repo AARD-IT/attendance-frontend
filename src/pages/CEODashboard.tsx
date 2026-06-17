@@ -44,7 +44,7 @@ interface LiveEvent {
 
 const AUTO_REFRESH_KEY = 'ceo-auto-refresh-enabled'
 const REFRESH_STATUS_KEY = 'ceo-refresh-status'
-const AUTO_REFRESH_INTERVAL_MS = 60 * 60 * 1000
+const AUTO_REFRESH_INTERVAL_MS = 30 * 60 * 1000
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
 
 interface RefreshStatus {
