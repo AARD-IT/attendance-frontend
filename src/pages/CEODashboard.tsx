@@ -61,6 +61,14 @@ export default function CEODashboard() {
   const [collapsed, setCollapsed] = useState(false)
   const [tab, setTab] = useState<'dashboard' | 'employees'>(location.pathname === '/ceo/employees' ? 'employees' : 'dashboard')
   const [summary, setSummary] = useState<SummaryData | null>(null)
+  const [syncStatus, setSyncStatus] = useState<{
+    status: 'SUCCESS' | 'FAILED' | 'RUNNING' | 'IDLE'
+    last_successful_sync: string | null
+    last_attempt: string | null
+    records_processed: number
+    duration_ms: number
+    error_message: string | null
+  } | null>(null)
   const [employees, setEmployees] = useState<EmployeeSummary[]>([])
   const [chartEmployees, setChartEmployees] = useState<EmployeeSummary[]>([])
   const [liveFeed, setLiveFeed] = useState<LiveEvent[]>([])
@@ -86,6 +94,14 @@ export default function CEODashboard() {
   useEffect(() => {
     setTab(location.pathname === '/ceo/employees' ? 'employees' : 'dashboard')
   }, [location.pathname])
+
+  useEffect(() => {
+    if (auth.token) {
+      dashboardService.getMinervaSyncStatus()
+        .then(setSyncStatus)
+        .catch((err) => console.error('Failed to load sync status:', err))
+    }
+  }, [auth.token])
 
   const fetchDashboardData = useCallback(async (forceRefresh = false) => {
     if (!auth.token) return
@@ -193,38 +209,49 @@ export default function CEODashboard() {
     if (!auth.token) return
 
     setIsRefreshing(true)
-    setRefreshMessage('')
+    setRefreshMessage('Synchronization started...')
     setError('')
 
     try {
-      const syncResult = await dashboardService.syncMinervaAll()
-      await Promise.all([
-        fetchDashboardData(true),
-        fetchChartData(true),
-        fetchEmployeeTableData(true),
-      ])
-
-      const timestamp = new Date().toLocaleString()
-      const nextStatus = {
-        enabled: autoRefreshEnabled,
-        lastLoadedAt: timestamp,
-        lastLoadedBy: source,
+      await dashboardService.syncMinervaAll()
+      
+      let attempts = 0
+      const maxAttempts = 60 // 3 minutes maximum
+      
+      const pollStatus = async (): Promise<void> => {
+        if (attempts >= maxAttempts) {
+          throw new Error('Synchronization timed out.')
+        }
+        attempts++
+        const status = await dashboardService.getMinervaSyncStatus()
+        setSyncStatus(status)
+        
+        if (status.status === 'RUNNING') {
+          await new Promise((resolve) => setTimeout(resolve, 3000))
+          return pollStatus()
+        }
+        
+        if (status.status === 'FAILED') {
+          throw new Error(status.error_message || 'Synchronization failed.')
+        }
+        
+        // On success: load new data
+        await Promise.all([
+          fetchDashboardData(true),
+          fetchChartData(true),
+          fetchEmployeeTableData(true),
+        ])
+        
+        setRefreshMessage('Latest Minerva data synced successfully.')
       }
-      setRefreshStatus(nextStatus)
-      localStorage.setItem(REFRESH_STATUS_KEY, JSON.stringify(nextStatus))
-      await syncDashboardSettings(autoRefreshEnabled, nextStatus)
-
-      if (syncResult?.success) {
-        setRefreshMessage(source === 'auto' ? 'Auto refresh loaded the latest Minerva data.' : 'Latest Minerva data synced successfully.')
-      } else {
-        setRefreshMessage(source === 'auto' ? 'Auto refresh completed, but some sync checks returned warnings.' : 'Refresh completed, but some sync checks returned warnings.')
-      }
+      
+      await pollStatus()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh latest Minerva data')
     } finally {
       setIsRefreshing(false)
     }
-  }, [auth.token, autoRefreshEnabled, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
+  }, [auth.token, fetchDashboardData, fetchChartData, fetchEmployeeTableData])
 
   useEffect(() => {
     if (!auth.token || !autoRefreshEnabled) return
@@ -399,19 +426,89 @@ export default function CEODashboard() {
       <main className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8">
         {error ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div> : null}
         {refreshMessage ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{refreshMessage}</div> : null}
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+
+        {syncStatus?.status === 'FAILED' && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 flex items-start gap-3">
+            <span className="text-lg">⚠</span>
             <div>
-              <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Refresh status</p>
-              <h2 className="text-lg font-semibold">Latest Minerva load</h2>
-              <p className="text-sm text-slate-500">This panel updates every time the dashboard refreshes data manually or via the 60-minute auto refresh cycle.</p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <p><span className="font-semibold">Auto refresh:</span> {autoRefreshEnabled ? 'ON' : 'OFF'}</p>
-              <p><span className="font-semibold">Last loaded:</span> {refreshStatus.lastLoadedAt || 'No refresh has been run yet.'}</p>
-              <p><span className="font-semibold">Triggered by:</span> {refreshStatus.lastLoadedBy ? refreshStatus.lastLoadedBy.toUpperCase() : '—'}</p>
+              <p className="font-semibold">Unable to reach Minerva.</p>
+              <p className="text-xs">Showing latest synchronized data. Last Successful Sync: {syncStatus.last_successful_sync ? new Date(syncStatus.last_successful_sync).toLocaleString() : 'Never'}</p>
             </div>
           </div>
+        )}
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-2 mb-4">
+            <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Synchronization status</p>
+            <h2 className="text-xl font-semibold">Minerva API Sync</h2>
+            <p className="text-sm text-slate-500">
+              The dashboard background synchronization runs automatically every 5 minutes.
+            </p>
+          </div>
+          
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5 border-t border-slate-100 pt-4">
+            <div className="flex flex-col justify-center">
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Status</p>
+              <div className="mt-2 flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-full ${
+                  syncStatus?.status === 'SUCCESS' ? 'bg-emerald-500 animate-pulse' :
+                  syncStatus?.status === 'RUNNING' ? 'bg-amber-500 animate-pulse' :
+                  syncStatus?.status === 'FAILED' ? 'bg-rose-500' : 'bg-slate-400'
+                }`} />
+                <span className="text-lg font-bold text-slate-800">
+                  {syncStatus?.status || 'IDLE'}
+                </span>
+              </div>
+            </div>
+            
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Last Attempt</p>
+              <p className="mt-2 text-lg font-bold text-slate-800">
+                {syncStatus?.last_attempt ? new Date(syncStatus.last_attempt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+              </p>
+              <p className="text-xs text-slate-400">
+                {syncStatus?.last_attempt ? new Date(syncStatus.last_attempt).toLocaleDateString() : ''}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
+                {syncStatus?.status === 'FAILED' ? 'Last Successful' : 'Next Sync'}
+              </p>
+              <p className="mt-2 text-lg font-bold text-slate-800">
+                {syncStatus?.status === 'FAILED' ? (
+                  syncStatus.last_successful_sync ? new Date(syncStatus.last_successful_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never'
+                ) : (
+                  syncStatus?.last_attempt ? new Date(new Date(syncStatus.last_attempt).getTime() + 5 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'
+                )}
+              </p>
+              <p className="text-xs text-slate-400">
+                {syncStatus?.status === 'FAILED' && syncStatus.last_successful_sync ? new Date(syncStatus.last_successful_sync).toLocaleDateString() : ''}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Records Synced</p>
+              <p className="mt-2 text-lg font-bold text-slate-800">
+                {syncStatus?.records_processed ?? 0}
+              </p>
+              <p className="text-xs text-slate-400">From Minerva API</p>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">Duration</p>
+              <p className="mt-2 text-lg font-bold text-slate-800">
+                {syncStatus?.duration_ms ? `${(syncStatus.duration_ms / 1000).toFixed(1)} sec` : '—'}
+              </p>
+              <p className="text-xs text-slate-400">API response time</p>
+            </div>
+          </div>
+          
+          {syncStatus?.status === 'FAILED' && syncStatus.error_message && (
+            <div className="mt-4 rounded-xl bg-rose-50 border border-rose-100 p-3 text-xs text-rose-700">
+              <span className="font-semibold">Sync Error:</span> {syncStatus.error_message}
+            </div>
+          )}
         </section>
 
         {tab === 'dashboard' ? (

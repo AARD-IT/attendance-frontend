@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import dashboardService from '../services/dashboardService'
 import { ensureEmailPreference, listEmailPreferences, type EmailPreferenceRow } from '../services/emailPreferenceService'
 import { sendEarlyLogoutAlertEmail, sendLateLoginAlertEmail, sendMonthlyReportEmail } from '../services/emailReportService'
+import { listEmailLogs, type EmailLogRow } from '../services/emailLogService'
 
 interface EmployeeProfileDetail {
   employee_id: string
@@ -42,6 +43,9 @@ export default function CEOAttendanceReportsEmployeeProfile() {
   const [sendingType, setSendingType] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [error, setError] = useState('')
+  const [logs, setLogs] = useState<EmailLogRow[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(false)
+  const [selectedLog, setSelectedLog] = useState<EmailLogRow | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -62,6 +66,18 @@ export default function CEOAttendanceReportsEmployeeProfile() {
         const allPreferences = await listEmailPreferences()
         const current = (allPreferences as EmailPreferenceRow[]).find((item) => String(item.employee_id) === String(detail.employee_id || employeeId)) || ensured
         setPreferences(current)
+
+        // Load employee's email logs
+        setLoadingLogs(true)
+        try {
+          const allLogs = await listEmailLogs()
+          const filtered = allLogs.filter((log) => String(log.employee_id) === String(detail.employee_id || employeeId))
+          setLogs(filtered)
+        } catch (lErr) {
+          console.error('Failed to load email logs:', lErr)
+        } finally {
+          setLoadingLogs(false)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load employee profile')
       } finally {
@@ -188,7 +204,16 @@ export default function CEOAttendanceReportsEmployeeProfile() {
           assignment: { shift_type: currentShift, shift_name: currentShift },
         })
       }
-      setFeedback({ type: 'success', message: 'Email queued successfully.' })
+      setFeedback({ type: 'success', message: 'Email sent successfully.' })
+      
+      // Reload logs
+      try {
+        const allLogs = await listEmailLogs()
+        const filtered = allLogs.filter((log) => String(log.employee_id) === String(employee.employee_id))
+        setLogs(filtered)
+      } catch (lErr) {
+        console.error('Failed to reload logs:', lErr)
+      }
     } catch (err) {
       setFeedback({ type: 'error', message: err instanceof Error ? err.message : 'Failed to send email.' })
     } finally {
@@ -311,7 +336,122 @@ export default function CEOAttendanceReportsEmployeeProfile() {
             </article>
           ))}
         </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
+            <p className="text-sm uppercase tracking-[0.25em] text-indigo-600">Communication History</p>
+            <h2 className="text-xl font-semibold">Sent Emails</h2>
+            <p className="text-sm text-slate-500">History of attendance reports and alerts sent to this employee.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500">
+                  <th className="px-3 py-3">Date</th>
+                  <th className="px-3 py-3">Email Type</th>
+                  <th className="px-3 py-3">Recipient</th>
+                  <th className="px-3 py-3">CC</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Attachments</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingLogs ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-4">Loading history...</td>
+                  </tr>
+                ) : logs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-4 text-slate-400">No emails sent to this employee yet.</td>
+                  </tr>
+                ) : (
+                  logs.map((log) => (
+                    <tr key={log.id} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedLog(log)}>
+                      <td className="px-3 py-3 font-semibold text-slate-700">{log.sent_at ? new Date(log.sent_at).toLocaleString() : '—'}</td>
+                      <td className="px-3 py-3">{log.email_type || '—'}</td>
+                      <td className="px-3 py-3">{log.employee_email || log.recipient_email || '—'}</td>
+                      <td className="px-3 py-3 text-xs text-slate-500">{log.cc_email || '—'}</td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          String(log.status).toUpperCase() === 'SENT' ? 'bg-emerald-100 text-emerald-700' :
+                          String(log.status).toUpperCase() === 'PENDING' ? 'bg-amber-100 text-amber-700' :
+                          'bg-rose-100 text-rose-700'
+                        }`}>{log.status}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        {log.email_type === 'monthly_report' ? '📄 CSV Report' : '—'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </main>
+
+      {/* Selected Email Log Preview Modal */}
+      {selectedLog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-xl font-bold text-slate-900">Email Log Details</h3>
+              <button onClick={() => setSelectedLog(null)} className="text-slate-400 hover:text-slate-600 font-bold text-lg focus:outline-none" aria-label="Close details">✕</button>
+            </div>
+            <div className="mt-4 space-y-3 text-sm text-slate-700">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">Date/Time</span>
+                  <span className="text-slate-800 font-medium">{selectedLog.sent_at ? new Date(selectedLog.sent_at).toLocaleString() : '—'}</span>
+                </div>
+                <div>
+                  <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">Employee</span>
+                  <span className="text-slate-800 font-medium">{selectedLog.employee_name || '—'}</span>
+                </div>
+                <div>
+                  <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">Email Type</span>
+                  <span className="text-slate-800 font-medium">{selectedLog.email_type || '—'}</span>
+                </div>
+                <div>
+                  <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">Triggered By</span>
+                  <span className="text-slate-800 font-medium">{selectedLog.source || 'AUTOMATION'}</span>
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">Recipient</span>
+                <span className="text-slate-800 font-medium">{selectedLog.employee_email || selectedLog.recipient_email || '—'}</span>
+              </div>
+              <div>
+                <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">CC Recipients</span>
+                <span className="text-slate-800 font-medium text-xs break-all">{selectedLog.cc_email || '—'}</span>
+              </div>
+              <div>
+                <span className="block text-xs uppercase tracking-wider text-slate-400 font-semibold">Status</span>
+                <span className={`mt-1 inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  String(selectedLog.status || '').toUpperCase() === 'SENT' ? 'bg-emerald-100 text-emerald-700' :
+                  String(selectedLog.status || '').toUpperCase() === 'PENDING' ? 'bg-amber-100 text-amber-700' :
+                  'bg-rose-100 text-rose-700'
+                }`}>{selectedLog.status || 'PENDING'}</span>
+              </div>
+              
+              <div className="mt-4 border-t border-slate-100 pt-3">
+                <p className="font-semibold text-slate-500 mb-1">Subject</p>
+                <p className="p-3 bg-slate-50 rounded-xl border border-slate-100 font-semibold text-slate-800">{selectedLog.subject || '—'}</p>
+              </div>
+
+              {selectedLog.email_body && (
+                <div className="mt-4">
+                  <p className="font-semibold text-slate-500 mb-1">Email HTML Preview</p>
+                  <div 
+                    className="p-4 bg-slate-50 rounded-2xl border border-slate-100 overflow-x-auto max-h-[300px] text-xs font-mono"
+                    dangerouslySetInnerHTML={{ __html: selectedLog.email_body }} 
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

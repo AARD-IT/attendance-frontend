@@ -184,4 +184,16 @@ export async function syncMinervaAll() {
   return await res.json()
 }
 
-export default { getDashboardSummary, getDashboardTrends, getDepartmentAnalytics, getWorkingHours, getEmployeeAttendanceTable, getEmployeeDetail, getEmployeeAttendanceAnalytics, getLiveAttendanceFeed, syncMinervaAll }
+export async function getMinervaSyncStatus() {
+  const res = await fetch(`${API_BASE}/api/minerva-sync/status`, {
+    headers: { ...authHeader() },
+  })
+
+  if (!res.ok) {
+    throw new Error('Failed to fetch synchronization status')
+  }
+
+  return await res.json()
+}
+
+export default { getDashboardSummary, getDashboardTrends, getDepartmentAnalytics, getWorkingHours, getEmployeeAttendanceTable, getEmployeeDetail, getEmployeeAttendanceAnalytics, getLiveAttendanceFeed, syncMinervaAll, getMinervaSyncStatus }
