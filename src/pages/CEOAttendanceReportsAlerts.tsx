@@ -191,20 +191,43 @@ export default function CEOAttendanceReportsAlerts() {
   }, [assignments, employees, preferencesByEmployee])
 
   const handlePreferenceChange = async (employeeId: string, modeType: 'monthly_report_mode' | 'late_login_mode' | 'early_logout_mode', modeValue: 'manual' | 'auto') => {
+    // Optimistically update the local state immediately so the dropdown reflects
+    // the new value on the first click without waiting for the server round-trip.
+    const previousPreference = preferencesByEmployee[employeeId]
+    setPreferencesByEmployee((prev) => ({
+      ...prev,
+      [employeeId]: {
+        ...prev[employeeId],
+        [modeType]: modeValue,
+      } as EmailPreferenceRow,
+    }))
+
     try {
       setSavingEmployeeId(employeeId)
       const updated = await updateEmailPreference(employeeId, modeType, modeValue)
+      // Merge server response with current state. We apply modeType: modeValue explicitly
+      // so that even if the server response is stale it cannot undo the user's selection.
       setPreferencesByEmployee((prev) => ({
         ...prev,
-        [employeeId]: updated as EmailPreferenceRow,
+        [employeeId]: {
+          ...prev[employeeId],
+          ...(updated as EmailPreferenceRow),
+          [modeType]: modeValue,
+        } as EmailPreferenceRow,
       }))
       setFeedback({ type: 'success', message: 'Communication preferences updated.' })
     } catch (err) {
+      // Revert to previous value on error
+      setPreferencesByEmployee((prev) => ({
+        ...prev,
+        [employeeId]: previousPreference,
+      }))
       setFeedback({ type: 'error', message: 'Failed to update communication preferences.' })
     } finally {
       setSavingEmployeeId(null)
     }
   }
+
 
   const handleSettingChange = async (key: keyof AutomationSettingsPayload, value: any) => {
     const updated = {
